@@ -1,0 +1,1195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Crystal Seeker</title>
+<meta name="description" content="Mine ore against the clock, sell it, and buy better gear to dig deeper.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+  /* base rules the Claude artifact viewer normally supplies */
+  :root{color-scheme:light}
+  img{max-width:100%}
+  [hidden]:not([hidden=until-found]){display:none!important}
+
+  :root {
+    --ground: #14110F;
+    --stone: #1F1B18;
+    --stone-2: #2C2622;
+    --edge: #3E362F;
+    --ink: #F0E9DD;
+    --ink-dim: #A89E90;
+    --ink-faint: #6E655B;
+    --accent: #F2B544;
+    --accent-deep: #B87A1A;
+    --danger: #E0553F;
+    --good: #3ED18C;
+    --display: "Alfa Slab One", "Rockwell", "Georgia", serif;
+    --mono: "IBM Plex Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: "IBM Plex Sans", "Helvetica Neue", Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.45;
+    overflow: hidden;
+  }
+  #app {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  /* ---------- HUD ---------- */
+  .hud {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 16px;
+    padding: 10px 18px;
+    background: var(--stone);
+    border-bottom: 2px solid var(--edge);
+  }
+  .hud-left, .hud-right { display: flex; gap: 28px; align-items: center; }
+  .hud-right { justify-content: flex-end; }
+  .cell { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+  .lbl {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .val {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 20px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    white-space: nowrap;
+  }
+  .val.cash { color: var(--accent); }
+  .val.loc { font-family: var(--sans); font-size: 16px; }
+  .timer .val {
+    font-family: var(--display);
+    font-weight: 400;
+    font-size: 40px;
+    letter-spacing: 0.02em;
+    min-width: 4.2ch;
+    text-align: center;
+    color: var(--ink);
+    transition: color 0.2s;
+  }
+  .timer .val.low { color: var(--danger); animation: pulse 0.5s steps(2, end) infinite; }
+  .timer .val.idle { color: var(--ink-faint); }
+  @keyframes pulse { 50% { opacity: 0.55; } }
+  .chips { display: flex; gap: 3px; flex-wrap: wrap; max-width: 220px; margin-top: 4px; min-height: 8px; }
+  .chip { width: 8px; height: 8px; border-radius: 2px; background: var(--c); box-shadow: 0 0 5px color-mix(in srgb, var(--c) 60%, transparent); }
+  .chip.empty { background: transparent; border: 1px dashed var(--ink-faint); box-shadow: none; }
+
+  /* ---------- Stage ---------- */
+  #stage { position: relative; flex: 1; min-height: 0; background: #0D0B0A; }
+  canvas { display: block; width: 100%; height: 100%; }
+  #toast {
+    position: absolute;
+    top: 18px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 15px;
+    letter-spacing: 0.04em;
+    padding: 6px 14px;
+    border-radius: 4px;
+    background: rgba(20, 17, 15, 0.85);
+    border: 1px solid var(--edge);
+    color: var(--ink);
+    opacity: 0;
+    transition: opacity 0.15s;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+  #toast.warn { color: var(--danger); border-color: var(--danger); }
+  #toast.crit { color: #1A1410; background: var(--accent); border-color: var(--accent); font-family: var(--display); font-size: 18px; letter-spacing: 0.06em; }
+
+  .hint {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 24px;
+    flex-wrap: wrap;
+    padding: 8px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    background: var(--stone);
+    border-top: 2px solid var(--edge);
+  }
+  .hint kbd {
+    font-family: inherit;
+    color: var(--ink-dim);
+    border: 1px solid var(--edge);
+    border-bottom-width: 2px;
+    border-radius: 3px;
+    padding: 0 5px;
+  }
+  #save-state { color: var(--ink-faint); }
+
+  /* ---------- Overlays ---------- */
+  .overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+    background: rgba(13, 11, 10, 0.72);
+    overflow: auto;
+  }
+  .panel {
+    background: var(--stone);
+    border: 2px solid var(--edge);
+    border-radius: 6px;
+    box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+    max-width: 100%;
+  }
+  .panel-ready {
+    width: 520px;
+    padding: 32px 36px 28px;
+    text-align: center;
+  }
+  h1, h2 {
+    font-family: var(--display);
+    font-weight: 400;
+    margin: 0;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+  h1 { font-size: 44px; line-height: 1; color: var(--accent); }
+  h2 { font-size: 22px; line-height: 1.1; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  .lede { color: var(--ink-dim); max-width: 44ch; margin: 12px auto 0; }
+  .btn {
+    font-family: var(--display);
+    font-size: 18px;
+    letter-spacing: 0.03em;
+    color: #1A1410;
+    background: var(--accent);
+    border: 0;
+    border-bottom: 4px solid var(--accent-deep);
+    border-radius: 4px;
+    padding: 12px 28px;
+    cursor: pointer;
+    transition: transform 0.05s, filter 0.1s;
+  }
+  .btn:hover { filter: brightness(1.08); }
+  .btn:active { transform: translateY(2px); border-bottom-width: 2px; }
+  .btn:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+  .btn.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); border-bottom-width: 3px; font-size: 15px; padding: 10px 18px; }
+  .btn-ghost {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    background: none;
+    border: 0;
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+  .btn-ghost:hover { color: var(--ink-dim); }
+
+  /* location picker */
+  .locs { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 20px; }
+  .loc-btn {
+    text-align: left;
+    font-family: var(--sans);
+    color: var(--ink);
+    background: var(--stone-2);
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    padding: 9px 11px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .loc-btn .nm { font-weight: 600; font-size: 14px; display: flex; align-items: center; gap: 7px; }
+  .loc-btn .sw { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 6px var(--c); }
+  .loc-btn .tg { font-family: var(--mono); font-size: 11px; color: var(--ink-dim); }
+  .loc-btn.active { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+  .loc-btn:disabled { cursor: default; color: var(--ink-faint); }
+  .loc-btn:disabled .nm { color: var(--ink-faint); }
+  .loc-btn:disabled .sw { filter: grayscale(1); opacity: 0.4; box-shadow: none; }
+  .loc-btn:disabled .tg { color: var(--ink-faint); }
+  .loc-btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+
+  .quotes {
+    margin: 18px 0 24px;
+    border-top: 1px solid var(--edge);
+    border-bottom: 1px solid var(--edge);
+    padding: 12px 0;
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px 12px;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .quote { display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  .quote .nm { display: flex; align-items: center; gap: 7px; color: var(--ink-dim); }
+  .quote .sw { width: 9px; height: 9px; border-radius: 2px; background: var(--c); box-shadow: 0 0 6px color-mix(in srgb, var(--c) 60%, transparent); }
+  .quote .pr { color: var(--ink); }
+  .quote .pr.up { color: var(--good); }
+  .quote .pr.down { color: var(--danger); }
+
+  /* Assay office */
+  .panel-assay {
+    width: 900px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+  .assay-col { padding: 26px 28px; }
+  .assay-col + .assay-col { border-left: 2px solid var(--edge); }
+  .assay-head { display: flex; flex-direction: column; gap: 4px; margin-bottom: 18px; }
+  table.ledger {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+  }
+  .ledger th {
+    text-align: left;
+    font-weight: 400;
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 0 0 8px;
+    border-bottom: 1px solid var(--edge);
+  }
+  .ledger td { padding: 7px 0; border-bottom: 1px dashed var(--edge); }
+  .ledger th.n, .ledger td.n { text-align: right; }
+  .ledger .nm { display: flex; align-items: center; gap: 8px; }
+  .ledger .sw { width: 10px; height: 10px; border-radius: 2px; background: var(--c); box-shadow: 0 0 6px color-mix(in srgb, var(--c) 60%, transparent); }
+  .ledger tr.total td { border-bottom: 0; padding-top: 12px; font-weight: 600; font-size: 16px; color: var(--accent); }
+  .ledger .empty td { color: var(--ink-faint); font-style: italic; border-bottom: 0; }
+  .assay-note { margin-top: 18px; color: var(--ink-dim); font-size: 13px; }
+  .balance { font-family: var(--mono); font-size: 13px; color: var(--ink-dim); }
+  .balance b { color: var(--accent); font-weight: 600; font-size: 16px; }
+
+  .store { display: flex; flex-direction: column; gap: 8px; }
+  .item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 4px 14px;
+    align-items: center;
+    padding: 10px 12px;
+    border: 1px solid var(--edge);
+    border-radius: 4px;
+    background: var(--stone-2);
+  }
+  .item .nm { font-weight: 600; }
+  .item .nm .tier { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); margin-left: 6px; letter-spacing: 0.1em; }
+  .item .desc { font-family: var(--mono); font-size: 12px; color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+  .item .desc b { color: var(--ink); font-weight: 600; }
+  .item .pips { display: flex; gap: 3px; margin-top: 4px; }
+  .item .pip { width: 14px; height: 4px; border-radius: 1px; background: var(--edge); }
+  .item .pip.on { background: var(--accent); }
+  .buy {
+    grid-row: 1 / span 3;
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    padding: 8px 12px;
+    min-width: 76px;
+    cursor: pointer;
+  }
+  .buy:hover:not(:disabled) { background: var(--accent); color: #1A1410; }
+  .buy:disabled { color: var(--ink-faint); border-color: var(--edge); cursor: default; }
+  .buy:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  .store-note {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border: 1px dashed var(--accent);
+    border-radius: 4px;
+    color: var(--ink);
+    font-size: 13px;
+  }
+  .assay-foot { display: flex; align-items: center; justify-content: space-between; margin-top: 20px; gap: 12px; flex-wrap: wrap; }
+  .assay-foot .actions { display: flex; gap: 8px; align-items: center; }
+
+  @media (max-width: 760px) {
+    .panel-assay { grid-template-columns: 1fr; }
+    .assay-col + .assay-col { border-left: 0; border-top: 2px solid var(--edge); }
+    .hud { gap: 8px; padding: 8px 12px; }
+    .hud-left, .hud-right { gap: 14px; }
+    .timer .val { font-size: 30px; }
+    .val { font-size: 16px; }
+    .quotes, .locs { grid-template-columns: repeat(2, 1fr); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .timer .val.low { animation: none; }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="hud">
+    <div class="hud-left">
+      <div class="cell"><span class="lbl">Shift</span><span class="val" id="hud-shift">1</span></div>
+      <div class="cell"><span class="lbl">Satchel</span><span class="val" id="hud-bag">0 / 10</span><div class="chips" id="hud-chips"></div></div>
+    </div>
+    <div class="cell timer"><span class="lbl">Time left</span><span class="val idle" id="hud-timer">20.0</span></div>
+    <div class="hud-right">
+      <div class="cell"><span class="lbl">Location</span><span class="val loc" id="hud-loc">Copper Hollow</span></div>
+      <div class="cell"><span class="lbl">Cash</span><span class="val cash" id="hud-cash">$0</span></div>
+    </div>
+  </header>
+
+  <div id="stage">
+    <canvas id="c"></canvas>
+    <div id="toast"></div>
+
+    <div class="overlay" id="ov-ready">
+      <div class="panel panel-ready">
+        <div class="eyebrow" id="ready-eyebrow">Shift 1</div>
+        <h1>Crystal Seeker</h1>
+        <p class="lede" id="ready-lede"></p>
+        <div class="locs" id="locs"></div>
+        <div class="quotes" id="quotes"></div>
+        <button class="btn" id="btn-start">Start shift</button>
+      </div>
+    </div>
+
+    <div class="overlay" id="ov-assay" hidden>
+      <div class="panel panel-assay">
+        <div class="assay-col">
+          <div class="assay-head">
+            <div class="eyebrow" id="assay-eyebrow">Shift 1 · Assay office</div>
+            <h2>Sold today</h2>
+          </div>
+          <table class="ledger">
+            <thead><tr><th>Mineral</th><th class="n">Qty</th><th class="n">Rate</th><th class="n">Paid</th></tr></thead>
+            <tbody id="ledger"></tbody>
+          </table>
+          <p class="assay-note" id="assay-note"></p>
+        </div>
+        <div class="assay-col">
+          <div class="assay-head">
+            <div class="eyebrow" id="store-eyebrow">Company store</div>
+            <h2>Upgrades</h2>
+          </div>
+          <div class="store" id="store"></div>
+          <p class="store-note" id="store-note" hidden></p>
+          <div class="assay-foot">
+            <div class="balance">Balance <b id="assay-cash">$0</b></div>
+            <div class="actions">
+              <button class="btn secondary" id="btn-travel" hidden>Travel</button>
+              <button class="btn" id="btn-next">Next shift</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="hint">
+    <span><kbd>W A S D</kbd> or arrows to move</span>
+    <span>walk into rock to mine it</span>
+    <span><kbd>Space</kbd> swings at what you face</span>
+    <span id="save-state">Saved in this browser</span>
+    <button class="btn-ghost" id="btn-reset">Start over</button>
+  </footer>
+</div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- Locations ----------
+  // Each location has its own rock, ore table, palette and upgrade track.
+  // The first tier of a location's upgrade track equals the last tier of the one before it,
+  // so travelling never loses stats; the next location unlocks once every upgrade here is bought.
+  const LOCATIONS = [
+    {
+      id: 'hollow', name: 'Copper Hollow', tag: 'Warm rock, easy pickings', accent: '#F2B544', accentDeep: '#B87A1A',
+      lede: 'Ore sits in the cave walls. Walk into it to swing, and whatever is in your satchel when the whistle blows gets sold at the assay office.',
+      wall: { dirt: 1, stone: 2 },
+      pal: { bg: '#0D0B0A', floor: '#1B1714', speck: 'rgba(255,255,255,0.04)', dirt: '#4A3D33', dirtMark: 'rgba(0,0,0,0.18)', stone: '#5A524A',
+             chipDirt: '#6B5644', chipStone: '#8C837A', face: 'rgba(255,220,160,0.16)',
+             light: 'rgba(255,200,120,0)', mid: 'rgba(20,14,8,0.35)', dark: 'rgba(8,6,5,0.95)' },
+      ores: [
+        { id: 'coal',     name: 'Coal',     price: 2,   hp: 2,  color: '#3A3A42', shine: '#6E6E7A', minD: 0,  w: 26 },
+        { id: 'copper',   name: 'Copper',   price: 5,   hp: 3,  color: '#D9843B', shine: '#FFC58A', minD: 2,  w: 20 },
+        { id: 'iron',     name: 'Iron',     price: 9,   hp: 4,  color: '#B9B4AE', shine: '#F1EEE8', minD: 5,  w: 14 },
+        { id: 'amethyst', name: 'Amethyst', price: 22,  hp: 6,  color: '#A574F0', shine: '#E3D0FF', minD: 9,  w: 9,  glow: true },
+        { id: 'emerald',  name: 'Emerald',  price: 50,  hp: 9,  color: '#3ED18C', shine: '#BDFFE0', minD: 13, w: 5,  glow: true },
+        { id: 'diamond',  name: 'Diamond',  price: 130, hp: 14, color: '#8FE9FF', shine: '#FFFFFF', minD: 17, w: 3,  glow: true },
+      ],
+      upgrades: [
+        { id: 'pick',    name: 'Pickaxe', unit: 'damage per swing',  levels: [1, 2, 3, 5, 8],           costs: [30, 90, 220, 550] },
+        { id: 'grip',    name: 'Grip',    unit: 'swings per second', levels: [3, 4, 5, 6.5, 8],         costs: [40, 110, 260, 600] },
+        { id: 'boots',   name: 'Boots',   unit: 'tiles per second',  levels: [4, 4.8, 5.6, 6.5, 7.5],   costs: [25, 70, 180, 450] },
+        { id: 'satchel', name: 'Satchel', unit: 'ore capacity',      levels: [10, 16, 25, 40, 70],      costs: [20, 60, 150, 400] },
+        { id: 'lantern', name: 'Lantern', unit: 'seconds per shift', levels: [20, 23, 26, 30, 35],      costs: [50, 130, 320, 750] },
+        { id: 'crit',    name: 'Lucky strike', unit: '% chance to smash 3×3', levels: [0.1, 0.5, 1, 2, 4], costs: [35, 100, 250, 600] },
+        { id: 'survey',  name: 'Survey map', unit: '× ore density',      levels: [1, 1.25, 1.5, 1.8, 2.2], costs: [30, 85, 210, 520] },
+      ],
+    },
+    {
+      id: 'frost', name: 'Frostbite Cave', tag: 'Ice-hard walls, silver and sapphire', accent: '#8FD3FF', accentDeep: '#3E8BC4',
+      lede: 'The walls here are frozen solid and take a real pickaxe to crack. Silver near the entrance, sapphire and opal deeper in.',
+      wall: { dirt: 3, stone: 6 },
+      pal: { bg: '#070B10', floor: '#121A22', speck: 'rgba(200,230,255,0.07)', dirt: '#7F97AC', dirtMark: 'rgba(255,255,255,0.2)', stone: '#4E6E8C',
+             chipDirt: '#A9C0D4', chipStone: '#7C9EBD', face: 'rgba(220,240,255,0.24)',
+             light: 'rgba(160,210,255,0)', mid: 'rgba(6,12,20,0.4)', dark: 'rgba(3,6,10,0.96)' },
+      ores: [
+        { id: 'frostquartz', name: 'Frost quartz', price: 8,   hp: 10, color: '#DDEBFF', shine: '#FFFFFF', minD: 0,  w: 26 },
+        { id: 'silver',      name: 'Silver',       price: 18,  hp: 14, color: '#C8CCD4', shine: '#FFFFFF', minD: 2,  w: 20 },
+        { id: 'sapphire',    name: 'Sapphire',     price: 45,  hp: 20, color: '#2F62E6', shine: '#9DB9FF', minD: 5,  w: 14, glow: true },
+        { id: 'cobalt',      name: 'Cobalt',       price: 100, hp: 30, color: '#4E7CFF', shine: '#C4D3FF', minD: 9,  w: 9,  glow: true },
+        { id: 'opal',        name: 'Aurora opal',  price: 240, hp: 44, color: '#7FF5D8', shine: '#F1FFFB', minD: 13, w: 5,  glow: true },
+        { id: 'glacier',     name: 'Glacier gem',  price: 650, hp: 64, color: '#F4FBFF', shine: '#FFFFFF', minD: 17, w: 3,  glow: true },
+      ],
+      upgrades: [
+        { id: 'pick',    name: 'Pickaxe', unit: 'damage per swing',  levels: [8, 12, 18, 26, 40],          costs: [900, 1800, 3600, 7000] },
+        { id: 'grip',    name: 'Grip',    unit: 'swings per second', levels: [8, 9, 10, 12, 14],           costs: [700, 1500, 3000, 6000] },
+        { id: 'boots',   name: 'Boots',   unit: 'tiles per second',  levels: [7.5, 8.5, 9.5, 11, 13],      costs: [600, 1300, 2600, 5200] },
+        { id: 'satchel', name: 'Satchel', unit: 'ore capacity',      levels: [70, 100, 140, 200, 300],     costs: [500, 1100, 2400, 4800] },
+        { id: 'lantern', name: 'Lantern', unit: 'seconds per shift', levels: [35, 38, 42, 47, 55],         costs: [1100, 2400, 4800, 9500] },
+        { id: 'crit',    name: 'Lucky strike', unit: '% chance to smash 3×3', levels: [4, 6, 8, 11, 15],   costs: [800, 1700, 3400, 6800] },
+        { id: 'survey',  name: 'Survey map', unit: '× ore density',      levels: [2.2, 2.5, 2.8, 3.2, 3.6], costs: [650, 1400, 2900, 5800] },
+      ],
+    },
+    {
+      id: 'magma', name: 'Magma Vault', tag: 'Gold and ruby in the heat', accent: '#FF8A4A', accentDeep: '#B84A1A',
+      lede: 'Cooled lava rock, glassy and dense. Gold along the tunnels, ruby and sunstone where the heat is worst.',
+      wall: { dirt: 12, stone: 24 },
+      pal: { bg: '#0F0605', floor: '#1E100C', speck: 'rgba(255,140,80,0.08)', dirt: '#5A2A1E', dirtMark: 'rgba(0,0,0,0.25)', stone: '#4A3530',
+             chipDirt: '#8A4A38', chipStone: '#7A5C52', face: 'rgba(255,160,100,0.22)',
+             light: 'rgba(255,150,90,0)', mid: 'rgba(24,8,4,0.4)', dark: 'rgba(10,3,2,0.96)' },
+      ores: [
+        { id: 'obsidian',  name: 'Obsidian',  price: 25,   hp: 30,  color: '#2A1F2E', shine: '#7A5F86', minD: 0,  w: 26 },
+        { id: 'gold',      name: 'Gold',      price: 70,   hp: 40,  color: '#F5C542', shine: '#FFF3B0', minD: 2,  w: 20 },
+        { id: 'ruby',      name: 'Ruby',      price: 180,  hp: 60,  color: '#E0304A', shine: '#FFB3BF', minD: 5,  w: 14, glow: true },
+        { id: 'sunstone',  name: 'Sunstone',  price: 400,  hp: 90,  color: '#FF8C3A', shine: '#FFE0C0', minD: 9,  w: 9,  glow: true },
+        { id: 'starstone', name: 'Starstone', price: 1000, hp: 140, color: '#FFE9A8', shine: '#FFFFFF', minD: 13, w: 5,  glow: true },
+        { id: 'heartfire', name: 'Heartfire', price: 2800, hp: 220, color: '#FF5A3C', shine: '#FFD9C8', minD: 17, w: 3,  glow: true },
+      ],
+      upgrades: [
+        { id: 'pick',    name: 'Pickaxe', unit: 'damage per swing',  levels: [40, 60, 90, 130, 200],       costs: [4000, 9000, 18000, 36000] },
+        { id: 'grip',    name: 'Grip',    unit: 'swings per second', levels: [14, 15, 16, 18, 20],         costs: [3500, 7500, 15000, 30000] },
+        { id: 'boots',   name: 'Boots',   unit: 'tiles per second',  levels: [13, 14, 15, 16.5, 18],       costs: [3000, 6500, 13000, 26000] },
+        { id: 'satchel', name: 'Satchel', unit: 'ore capacity',      levels: [300, 400, 550, 750, 1000],   costs: [2500, 5500, 12000, 24000] },
+        { id: 'lantern', name: 'Lantern', unit: 'seconds per shift', levels: [55, 60, 66, 73, 80],         costs: [5000, 11000, 22000, 45000] },
+        { id: 'crit',    name: 'Lucky strike', unit: '% chance to smash 3×3', levels: [15, 18, 22, 27, 35], costs: [3800, 8500, 17000, 34000] },
+        { id: 'survey',  name: 'Survey map', unit: '× ore density',      levels: [3.6, 4, 4.5, 5, 6],     costs: [3200, 7000, 14000, 28000] },
+      ],
+    },
+  ];
+  const LOC_BY_ID = Object.fromEntries(LOCATIONS.map(l => [l.id, l]));
+  const ORE_BY_ID = Object.fromEntries(LOCATIONS.flatMap(l => l.ores).map(o => [o.id, o]));
+
+  const MAP = 44;
+  const CENTER = MAP / 2 - 0.5;
+  const TILE = 40;
+  const SAVE_KEY = 'crystal-seeker-v2';
+
+  // ---------- State ----------
+  const S = {
+    money: 0,
+    levels: {},          // levels[locationId][upgradeId]
+    shift: 1,
+    loc: 'hollow',
+    savedAt: 0,
+    phase: 'ready',      // ready | mining | mining-done | assay
+    timeLeft: 20,
+    bag: [],
+    map: null,
+    player: { x: 0, y: 0, fx: 1, fy: 0, cool: 0, swing: 0, target: null },
+    particles: [],
+    prices: {},
+    toastT: 0,
+  };
+  for (const l of LOCATIONS) S.levels[l.id] = Object.fromEntries(l.upgrades.map(u => [u.id, 0]));
+
+  const LOC = () => LOC_BY_ID[S.loc];
+  const stat = id => { const u = LOC().upgrades.find(u => u.id === id); return u.levels[S.levels[S.loc][id]]; };
+  const isMaxed = loc => loc.upgrades.every(u => S.levels[loc.id][u.id] >= u.levels.length - 1);
+  const nextLocation = loc => LOCATIONS[LOCATIONS.indexOf(loc) + 1] || null;
+  const isUnlocked = loc => { const i = LOCATIONS.indexOf(loc); return i === 0 || isMaxed(LOCATIONS[i - 1]); };
+
+  // ---------- Persistence ----------
+  // Two stores: this browser's localStorage right away, plus the artifact database when the
+  // page is opened through claude.ai, so progress follows the link and not just the browser.
+  let db = null;
+  const snapshot = () => ({ v: 2, money: S.money, shift: S.shift, loc: S.loc, levels: S.levels, savedAt: Date.now() });
+  function applySave(d) {
+    if (!d || typeof d.money !== 'number') return false;
+    S.money = d.money;
+    S.shift = d.shift || 1;
+    S.savedAt = d.savedAt || 0;
+    if (d.v === 2 && d.levels) {
+      for (const l of LOCATIONS) for (const u of l.upgrades) {
+        const v = d.levels[l.id]?.[u.id];
+        if (typeof v === 'number') S.levels[l.id][u.id] = Math.min(v, u.levels.length - 1);
+      }
+    } else if (d.levels) {
+      // v1 saves only knew Copper Hollow
+      for (const u of LOCATIONS[0].upgrades) if (typeof d.levels[u.id] === 'number') S.levels.hollow[u.id] = d.levels[u.id];
+    }
+    S.loc = LOC_BY_ID[d.loc] && isUnlocked(LOC_BY_ID[d.loc]) ? d.loc : 'hollow';
+    return true;
+  }
+  function save() {
+    const d = snapshot();
+    S.savedAt = d.savedAt;
+    try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); } catch (e) {}
+    if (db) db.doc('saves/progress').set(d).then(() => setSaveState('Saved to your account')).catch(() => setSaveState('Saved in this browser'));
+  }
+  function loadLocal() {
+    try {
+      const raw = localStorage.getItem(SAVE_KEY) || localStorage.getItem('crystal-seeker-v1');
+      if (raw) applySave(JSON.parse(raw));
+    } catch (e) {}
+  }
+  async function connectDb() {
+    if (!window.claude || typeof window.claude.use !== 'function') return;
+    const got = await window.claude.use('db');
+    if (!got) return;
+    db = got;
+    try {
+      const snap = await db.doc('saves/progress').get();
+      const d = snap.exists ? snap.data() : null;
+      if (d && (d.savedAt || 0) > S.savedAt) {
+        applySave(d);
+        if (S.phase === 'ready') readyShift();
+      }
+      setSaveState('Saved to your account');
+      if (!d) save();
+    } catch (e) {}
+  }
+  function setSaveState(text) { el.saveState.textContent = text; }
+
+  // ---------- Map ----------
+  const WALL_ORE = 0.36;
+  const DEEP_ORE = 0.12;
+  const dist = (x, y) => Math.hypot(x - CENTER, y - CENTER);
+  const inBounds = (x, y) => x >= 1 && y >= 1 && x < MAP - 1 && y < MAP - 1;
+
+  function makeMap() {
+    const L = LOC();
+    const m = [];
+    for (let y = 0; y < MAP; y++) {
+      const row = [];
+      for (let x = 0; x < MAP; x++) {
+        const seed = Math.random();
+        if (!inBounds(x, y)) { row.push({ t: 'bedrock', hp: 1, max: 1, seed }); continue; }
+        const dirtChance = dist(x, y) < 8 ? 0.55 : 0.35;
+        row.push(Math.random() < dirtChance
+          ? { t: 'dirt', hp: L.wall.dirt, max: L.wall.dirt, seed }
+          : { t: 'stone', hp: L.wall.stone, max: L.wall.stone, seed });
+      }
+      m.push(row);
+    }
+    const carveDisc = (cx, cy, r) => {
+      for (let y = Math.floor(cy - r); y <= Math.ceil(cy + r); y++)
+        for (let x = Math.floor(cx - r); x <= Math.ceil(cx + r); x++)
+          if (inBounds(x, y) && Math.hypot(x - cx, y - cy) <= r) m[y][x] = { t: 'floor', seed: Math.random() };
+    };
+    const carve = (x, y) => { if (inBounds(x, y)) m[y][x] = { t: 'floor', seed: Math.random() }; };
+
+    carveDisc(CENTER, CENTER, 2.4);
+    const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    const walkers = 6, steps = 80;
+    for (let w = 0; w < walkers; w++) {
+      let x = Math.round(CENTER), y = Math.round(CENTER);
+      let [dx, dy] = DIRS[w % 4];
+      for (let s = 0; s < steps; s++) {
+        if (Math.random() < 0.25) [dx, dy] = DIRS[Math.floor(Math.random() * 4)];
+        const nx = x + dx, ny = y + dy;
+        if (!inBounds(nx, ny)) { [dx, dy] = [-dx, -dy]; continue; }
+        x = nx; y = ny;
+        carve(x, y);
+        if (Math.random() < 0.3) carve(x + dy, y + dx);
+        if (s % 20 === 19) carveDisc(x, y, 2 + Math.random());
+      }
+    }
+
+    const density = stat('survey');
+    for (let y = 1; y < MAP - 1; y++) for (let x = 1; x < MAP - 1; x++) {
+      const t = m[y][x];
+      if (t.t === 'floor') continue;
+      const d = dist(x, y);
+      if (d < 3.5) continue;
+      const faces = DIRS.some(([ox, oy]) => m[y + oy][x + ox].t === 'floor');
+      if (Math.random() >= Math.min(0.9, (faces ? WALL_ORE : DEEP_ORE) * density)) continue;
+      const ore = rollOre(d, L.ores);
+      if (ore) m[y][x] = { t: 'ore', ore: ore.id, hp: ore.hp, max: ore.hp, seed: t.seed };
+    }
+    return m;
+  }
+  function rollOre(d, ores) {
+    const opts = ores.filter(o => d >= o.minD).map(o => [o, o.w * Math.min(1, (d - o.minD + 1) / 4)]);
+    const total = opts.reduce((a, o) => a + o[1], 0);
+    if (!total) return null;
+    let r = Math.random() * total;
+    for (const [o, w] of opts) { r -= w; if (r <= 0) return o; }
+    return opts[opts.length - 1][0];
+  }
+  const solid = (tx, ty) => tx < 0 || ty < 0 || tx >= MAP || ty >= MAP || S.map[ty][tx].t !== 'floor';
+
+  // ---------- Shift flow ----------
+  function rollPrices() {
+    S.prices = {};
+    for (const o of LOC().ores) S.prices[o.id] = Math.max(1, Math.round(o.price * (0.85 + Math.random() * 0.4)));
+  }
+  function applyTheme() {
+    const L = LOC();
+    document.documentElement.style.setProperty('--accent', L.accent);
+    document.documentElement.style.setProperty('--accent-deep', L.accentDeep);
+    document.getElementById('stage').style.background = L.pal.bg;
+  }
+  function readyShift() {
+    S.phase = 'ready';
+    applyTheme();
+    S.map = makeMap();
+    S.bag = [];
+    S.particles = [];
+    S.timeLeft = stat('lantern');
+    Object.assign(S.player, { x: CENTER + 0.5, y: CENTER + 0.5, fx: 1, fy: 0, cool: 0, swing: 0, target: null });
+    rollPrices();
+    const L = LOC();
+    el.readyEyebrow.textContent = `Shift ${S.shift} · ${L.name} · ${S.timeLeft}s on the clock`;
+    el.readyLede.textContent = S.shift === 1 ? 'Twenty seconds on the clock. ' + L.lede : L.lede;
+    renderLocations();
+    renderQuotes();
+    el.ovReady.hidden = false;
+    el.ovAssay.hidden = true;
+    el.timer.classList.add('idle');
+    lastHud = '';
+    renderHud();
+    el.btnStart.focus();
+  }
+  function startShift() {
+    S.phase = 'mining';
+    el.ovReady.hidden = true;
+    el.timer.classList.remove('idle');
+  }
+  function endShift() {
+    S.phase = 'mining-done';
+    S.timeLeft = 0;
+    renderHud();
+    setTimeout(() => {
+      S.phase = 'assay';
+      const rows = sellBag();
+      renderAssay(rows);
+      el.ovAssay.hidden = false;
+      el.btnNext.focus();
+      save();
+    }, 500);
+  }
+  function sellBag() {
+    const counts = {};
+    for (const id of S.bag) counts[id] = (counts[id] || 0) + 1;
+    const rows = LOC().ores.filter(o => counts[o.id]).map(o => ({
+      ore: o, qty: counts[o.id], rate: S.prices[o.id], paid: counts[o.id] * S.prices[o.id],
+    }));
+    const total = rows.reduce((a, r) => a + r.paid, 0);
+    S.money += total;
+    S.lastTotal = total;
+    S.bag = [];
+    return rows;
+  }
+  function nextShift() {
+    S.shift += 1;
+    save();
+    readyShift();
+  }
+  function travelTo(id) {
+    const L = LOC_BY_ID[id];
+    if (!L || !isUnlocked(L) || S.loc === id) return;
+    S.loc = id;
+    save();
+    readyShift();
+  }
+  function resetAll() {
+    if (!confirm('Wipe your cash, upgrades and unlocked locations and start from shift 1?')) return;
+    S.money = 0; S.shift = 1; S.loc = 'hollow';
+    for (const l of LOCATIONS) for (const u of l.upgrades) S.levels[l.id][u.id] = 0;
+    save();
+    readyShift();
+  }
+
+  // ---------- Mining ----------
+  function tryHit(tx, ty) {
+    const tile = S.map[ty]?.[tx];
+    if (!tile || tile.t === 'floor') return;
+    const p = S.player;
+    if (tile.t === 'bedrock') { toast('Bedrock. Nothing gets through.', true); return; }
+    if (tile.t === 'ore' && S.bag.length >= stat('satchel')) {
+      toast('Satchel full', true);
+      return;
+    }
+    if (p.cool > 0) return;
+    p.cool = 1 / stat('grip');
+    p.swing = 1;
+    if (Math.random() * 100 < stat('crit')) {
+      // a lucky strike shatters the whole 3x3 around the target
+      let smashed = 0;
+      for (let oy = -1; oy <= 1; oy++) for (let ox = -1; ox <= 1; ox++) {
+        if (breakTile(tx + ox, ty + oy, true)) smashed++;
+      }
+      spawnParticles(tx + 0.5, ty + 0.5, 30, LOC().accent, 1.6);
+      toast(`LUCKY STRIKE  ×${smashed}`, false, true);
+      renderHud();
+      return;
+    }
+    tile.hp -= stat('pick');
+    spawnParticles(tx + 0.5, ty + 0.5, 4, chipColor(tile), 0.5);
+    if (tile.hp <= 0) { breakTile(tx, ty, false); renderHud(); }
+  }
+  function chipColor(tile) {
+    const P = LOC().pal;
+    return tile.t === 'ore' ? ORE_BY_ID[tile.ore].color : (tile.t === 'dirt' ? P.chipDirt : P.chipStone);
+  }
+  // Breaks a tile to floor. Ore only breaks if the satchel has room, so a crit never wastes it.
+  function breakTile(tx, ty, quiet) {
+    const tile = S.map[ty]?.[tx];
+    if (!tile || tile.t === 'floor' || tile.t === 'bedrock') return false;
+    if (tile.t === 'ore') {
+      if (S.bag.length >= stat('satchel')) return false;
+      S.bag.push(tile.ore);
+      const o = ORE_BY_ID[tile.ore];
+      spawnParticles(tx + 0.5, ty + 0.5, 14, o.shine, 1);
+      if (!quiet) toast(`+ ${o.name}`);
+    } else {
+      spawnParticles(tx + 0.5, ty + 0.5, 8, chipColor(tile), 0.8);
+    }
+    S.map[ty][tx] = { t: 'floor', seed: Math.random() };
+    return true;
+  }
+  function spawnParticles(x, y, n, color, power) {
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = (1.5 + Math.random() * 3) * power;
+      S.particles.push({ x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.35 + Math.random() * 0.4, color, size: 2 + Math.random() * 3 });
+    }
+  }
+  function toast(text, warn, crit) {
+    el.toast.textContent = text;
+    el.toast.classList.toggle('warn', !!warn);
+    el.toast.classList.toggle('crit', !!crit);
+    el.toast.classList.add('show');
+    S.toastT = 0.9;
+  }
+
+  // ---------- Update ----------
+  const keys = new Set();
+  const R = 0.34;
+
+  function boxBlocked(cx, cy) {
+    const x0 = Math.floor(cx - R), x1 = Math.floor(cx + R);
+    const y0 = Math.floor(cy - R), y1 = Math.floor(cy + R);
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) if (solid(tx, ty)) return [tx, ty];
+    return null;
+  }
+
+  function update(dt) {
+    S.toastT -= dt;
+    if (S.toastT <= 0) el.toast.classList.remove('show');
+    const p = S.player;
+    p.cool = Math.max(0, p.cool - dt);
+    p.swing = Math.max(0, p.swing - dt * 6);
+
+    for (const q of S.particles) {
+      q.x += q.vx * dt; q.y += q.vy * dt; q.vy += 6 * dt; q.life -= dt;
+    }
+    S.particles = S.particles.filter(q => q.life > 0);
+
+    if (S.phase !== 'mining') return;
+
+    S.timeLeft -= dt;
+    if (S.timeLeft <= 0) { endShift(); return; }
+
+    let dx = 0, dy = 0;
+    if (keys.has('KeyW') || keys.has('ArrowUp')) dy -= 1;
+    if (keys.has('KeyS') || keys.has('ArrowDown')) dy += 1;
+    if (keys.has('KeyA') || keys.has('ArrowLeft')) dx -= 1;
+    if (keys.has('KeyD') || keys.has('ArrowRight')) dx += 1;
+    if (dx || dy) {
+      const len = Math.hypot(dx, dy); dx /= len; dy /= len;
+      p.fx = dx; p.fy = dy;
+    }
+    const spd = stat('boots');
+    p.target = null;
+
+    if (dx) {
+      const nx = p.x + dx * spd * dt;
+      const hit = boxBlocked(nx, p.y);
+      if (hit) {
+        p.x = dx > 0 ? Math.floor(nx + R) - R - 0.001 : Math.ceil(nx - R) + R + 0.001;
+        p.target = hit;
+      } else p.x = nx;
+    }
+    if (dy) {
+      const ny = p.y + dy * spd * dt;
+      const hit = boxBlocked(p.x, ny);
+      if (hit) {
+        p.y = dy > 0 ? Math.floor(ny + R) - R - 0.001 : Math.ceil(ny - R) + R + 0.001;
+        if (!p.target) p.target = hit;
+      } else p.y = ny;
+    }
+
+    if (keys.has('Space') && !p.target) {
+      const ax = Math.abs(p.fx) >= Math.abs(p.fy);
+      const tx = Math.floor(p.x + (ax ? Math.sign(p.fx) * 0.75 : 0));
+      const ty = Math.floor(p.y + (ax ? 0 : Math.sign(p.fy) * 0.75));
+      if (solid(tx, ty)) p.target = [tx, ty];
+    }
+    if (p.target) tryHit(p.target[0], p.target[1]);
+
+    renderHud();
+  }
+
+  // ---------- Render ----------
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  let vw = 0, vh = 0, dpr = 1;
+  function resize() {
+    const st = document.getElementById('stage');
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    vw = st.clientWidth; vh = st.clientHeight;
+    canvas.width = Math.floor(vw * dpr); canvas.height = Math.floor(vh * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  window.addEventListener('resize', resize);
+
+  function draw() {
+    const p = S.player;
+    const P = LOC().pal;
+    const camX = Math.max(0, Math.min(MAP * TILE - vw, p.x * TILE - vw / 2));
+    const camY = Math.max(0, Math.min(MAP * TILE - vh, p.y * TILE - vh / 2));
+    ctx.fillStyle = P.bg;
+    ctx.fillRect(0, 0, vw, vh);
+    ctx.save();
+    ctx.translate(-camX, -camY);
+
+    const x0 = Math.max(0, Math.floor(camX / TILE)), x1 = Math.min(MAP - 1, Math.ceil((camX + vw) / TILE));
+    const y0 = Math.max(0, Math.floor(camY / TILE)), y1 = Math.min(MAP - 1, Math.ceil((camY + vh) / TILE));
+    for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) drawTile(S.map[ty][tx], tx, ty, P);
+
+    for (const q of S.particles) {
+      ctx.globalAlpha = Math.min(1, q.life * 3);
+      ctx.fillStyle = q.color;
+      ctx.fillRect(q.x * TILE - q.size / 2, q.y * TILE - q.size / 2, q.size, q.size);
+    }
+    ctx.globalAlpha = 1;
+
+    drawPlayer();
+
+    const px = p.x * TILE, py = p.y * TILE;
+    const radius = TILE * (5.5 + S.levels[S.loc].lantern * 0.6);
+    const g = ctx.createRadialGradient(px, py, TILE * 1.2, px, py, radius);
+    g.addColorStop(0, P.light);
+    g.addColorStop(0.55, P.mid);
+    g.addColorStop(1, P.dark);
+    ctx.fillStyle = g;
+    ctx.fillRect(camX, camY, vw, vh);
+    ctx.restore();
+  }
+
+  function drawTile(tile, tx, ty, P) {
+    const x = tx * TILE, y = ty * TILE;
+    ctx.fillStyle = P.floor;
+    ctx.fillRect(x, y, TILE, TILE);
+    if (tile.t === 'floor') {
+      ctx.fillStyle = P.speck;
+      const s = tile.seed;
+      ctx.fillRect(x + 6 + s * 20, y + 8 + ((s * 7) % 1) * 20, 3, 3);
+      ctx.fillRect(x + 4 + ((s * 13) % 1) * 24, y + 5 + ((s * 3) % 1) * 22, 2, 2);
+      return;
+    }
+    const inset = 2;
+    if (tile.t === 'bedrock') {
+      ctx.fillStyle = P.bg;
+      ctx.fillRect(x, y, TILE, TILE);
+      ctx.fillStyle = P.stone + '55';
+      roundRect(x + inset, y + inset, TILE - inset * 2, TILE - inset * 2, 3);
+      return;
+    }
+    if (tile.t === 'dirt') {
+      ctx.fillStyle = P.dirt;
+      roundRect(x + inset, y + inset, TILE - inset * 2, TILE - inset * 2, 6);
+      ctx.fillStyle = P.dirtMark;
+      ctx.fillRect(x + 8 + tile.seed * 14, y + 10 + ((tile.seed * 5) % 1) * 14, 6, 4);
+    } else {
+      ctx.fillStyle = P.stone;
+      roundRect(x + inset, y + inset, TILE - inset * 2, TILE - inset * 2, 5);
+      ctx.fillStyle = 'rgba(255,255,255,0.07)';
+      ctx.fillRect(x + inset, y + inset, TILE - inset * 2, 4);
+      ctx.fillStyle = 'rgba(0,0,0,0.22)';
+      ctx.fillRect(x + inset, y + TILE - inset - 5, TILE - inset * 2, 5);
+    }
+    ctx.fillStyle = P.face;
+    if (!solid(tx, ty - 1)) ctx.fillRect(x + inset, y + inset, TILE - inset * 2, 2);
+    if (!solid(tx, ty + 1)) ctx.fillRect(x + inset, y + TILE - inset - 2, TILE - inset * 2, 2);
+    if (!solid(tx - 1, ty)) ctx.fillRect(x + inset, y + inset, 2, TILE - inset * 2);
+    if (!solid(tx + 1, ty)) ctx.fillRect(x + TILE - inset - 2, y + inset, 2, TILE - inset * 2);
+    if (tile.t === 'ore') {
+      const o = ORE_BY_ID[tile.ore];
+      const cx = x + TILE / 2, cy = y + TILE / 2;
+      if (o.glow) {
+        ctx.fillStyle = o.color + '55';
+        ctx.beginPath(); ctx.arc(cx, cy, TILE * 0.62, 0, Math.PI * 2); ctx.fill();
+      }
+      const s = tile.seed;
+      crystal(cx - 6 + s * 6, cy + 2, 9, o, s);
+      crystal(cx + 7 - s * 5, cy - 5, 7, o, s * 3);
+      crystal(cx - 2, cy - 9 + s * 4, 5, o, s * 7);
+    }
+    if (tile.hp < tile.max) {
+      const f = Math.min(1, Math.max(0, 1 - tile.hp / tile.max));
+      ctx.strokeStyle = 'rgba(10,8,6,0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      const cx = x + TILE / 2, cy = y + TILE / 2;
+      const n = 2 + Math.floor(f * 4);
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + tile.seed * 6;
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(a) * TILE * 0.45 * (0.5 + f), cy + Math.sin(a) * TILE * 0.45 * (0.5 + f));
+      }
+      ctx.stroke();
+    }
+  }
+  function crystal(cx, cy, r, o, s) {
+    const tilt = (s % 1) * 0.8 - 0.4;
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(tilt);
+    ctx.fillStyle = o.color;
+    ctx.beginPath();
+    ctx.moveTo(0, -r); ctx.lineTo(r * 0.7, 0); ctx.lineTo(0, r); ctx.lineTo(-r * 0.7, 0); ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = o.shine;
+    ctx.beginPath();
+    ctx.moveTo(0, -r); ctx.lineTo(r * 0.35, -r * 0.3); ctx.lineTo(-r * 0.2, -r * 0.1); ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  function roundRect(x, y, w, h, r) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y); ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r); ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h); ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r); ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath(); ctx.fill();
+  }
+  function drawPlayer() {
+    const p = S.player;
+    const px = p.x * TILE, py = p.y * TILE;
+    const face = Math.atan2(p.fy, p.fx);
+    ctx.save();
+    ctx.translate(px, py);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.beginPath(); ctx.ellipse(0, 6, 12, 6, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.save();
+    ctx.rotate(face + (-1.1 + (1 - p.swing) * 1.4));
+    ctx.strokeStyle = '#8C6A3F'; ctx.lineWidth = 3; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(4, 0); ctx.lineTo(20, 0); ctx.stroke();
+    ctx.strokeStyle = '#D8D3CB'; ctx.lineWidth = 4;
+    ctx.beginPath(); ctx.moveTo(20, -7); ctx.quadraticCurveTo(24, 0, 20, 7); ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#5B6F8C';
+    ctx.beginPath(); ctx.arc(0, 0, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#F2B544';
+    ctx.beginPath(); ctx.arc(0, -3, 8, Math.PI, 0); ctx.fill();
+    ctx.fillStyle = '#FFF1C8';
+    ctx.beginPath(); ctx.arc(Math.cos(face) * 5, -3 + Math.sin(face) * 3, 2.5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------- DOM ----------
+  const el = {
+    shift: document.getElementById('hud-shift'),
+    bag: document.getElementById('hud-bag'),
+    chips: document.getElementById('hud-chips'),
+    timer: document.getElementById('hud-timer'),
+    cash: document.getElementById('hud-cash'),
+    loc: document.getElementById('hud-loc'),
+    toast: document.getElementById('toast'),
+    ovReady: document.getElementById('ov-ready'),
+    ovAssay: document.getElementById('ov-assay'),
+    readyEyebrow: document.getElementById('ready-eyebrow'),
+    readyLede: document.getElementById('ready-lede'),
+    locs: document.getElementById('locs'),
+    quotes: document.getElementById('quotes'),
+    btnStart: document.getElementById('btn-start'),
+    btnNext: document.getElementById('btn-next'),
+    btnTravel: document.getElementById('btn-travel'),
+    btnReset: document.getElementById('btn-reset'),
+    assayEyebrow: document.getElementById('assay-eyebrow'),
+    storeEyebrow: document.getElementById('store-eyebrow'),
+    ledger: document.getElementById('ledger'),
+    assayNote: document.getElementById('assay-note'),
+    assayCash: document.getElementById('assay-cash'),
+    store: document.getElementById('store'),
+    storeNote: document.getElementById('store-note'),
+    saveState: document.getElementById('save-state'),
+  };
+  const money = n => '$' + n.toLocaleString('en-US');
+
+  let lastHud = '';
+  function renderHud() {
+    const cap = stat('satchel');
+    const key = `${S.shift}|${S.loc}|${S.bag.length}|${cap}|${S.money}|${S.timeLeft.toFixed(1)}`;
+    if (key === lastHud) return;
+    lastHud = key;
+    el.shift.textContent = S.shift;
+    el.loc.textContent = LOC().name;
+    el.bag.textContent = `${S.bag.length} / ${cap}`;
+    el.cash.textContent = money(S.money);
+    el.timer.textContent = Math.max(0, S.timeLeft).toFixed(1);
+    el.timer.classList.toggle('low', S.phase === 'mining' && S.timeLeft <= 5);
+    let chips = '';
+    for (const id of S.bag.slice(0, 40)) chips += `<span class="chip" style="--c:${ORE_BY_ID[id].color}"></span>`;
+    for (let i = S.bag.length; i < Math.min(cap, 40); i++) chips += '<span class="chip empty"></span>';
+    el.chips.innerHTML = chips;
+  }
+  function renderLocations() {
+    el.locs.innerHTML = LOCATIONS.map((l, i) => {
+      const open = isUnlocked(l);
+      const tag = open ? l.tag : `Buy out ${LOCATIONS[i - 1].name}'s store to unlock`;
+      return `<button class="loc-btn ${l.id === S.loc ? 'active' : ''}" data-loc="${l.id}" ${open ? '' : 'disabled'}>
+        <span class="nm"><span class="sw" style="--c:${l.accent}"></span>${l.name}</span><span class="tg">${tag}</span></button>`;
+    }).join('');
+  }
+  function renderQuotes() {
+    el.quotes.innerHTML = LOC().ores.map(o => {
+      const p = S.prices[o.id];
+      const cls = p > o.price * 1.08 ? 'up' : p < o.price * 0.92 ? 'down' : '';
+      return `<div class="quote"><span class="nm"><span class="sw" style="--c:${o.color}"></span>${o.name}</span><span class="pr ${cls}">${money(p)}</span></div>`;
+    }).join('');
+  }
+  function renderAssay(rows) {
+    const L = LOC();
+    el.assayEyebrow.textContent = `Shift ${S.shift} · ${L.name} · Assay office`;
+    if (!rows.length) {
+      el.ledger.innerHTML = '<tr class="empty"><td colspan="4">Empty satchel. The clerk looks at you with pity.</td></tr>';
+    } else {
+      el.ledger.innerHTML = rows.map(r =>
+        `<tr><td><span class="nm"><span class="sw" style="--c:${r.ore.color}"></span>${r.ore.name}</span></td><td class="n">${r.qty}</td><td class="n">${money(r.rate)}</td><td class="n">${money(r.paid)}</td></tr>`
+      ).join('') + `<tr class="total"><td colspan="3">Paid out</td><td class="n">${money(S.lastTotal)}</td></tr>`;
+    }
+    const best = rows.slice().sort((a, b) => b.paid - a.paid)[0];
+    el.assayNote.textContent = best
+      ? `${best.ore.name} carried the shift. Rates get re-quoted every morning, so check the board before you go down.`
+      : 'Try walking straight into a rock wall. The pickaxe swings on its own.';
+    renderStore();
+  }
+  function renderStore() {
+    const L = LOC();
+    el.assayCash.textContent = money(S.money);
+    el.cash.textContent = money(S.money);
+    el.storeEyebrow.textContent = `${L.name} · Company store`;
+    el.store.innerHTML = L.upgrades.map(u => {
+      const lv = S.levels[L.id][u.id];
+      const maxed = lv >= u.levels.length - 1;
+      const cost = maxed ? null : u.costs[lv];
+      const pips = u.levels.slice(1).map((_, i) => `<span class="pip ${i < lv ? 'on' : ''}"></span>`).join('');
+      const desc = maxed
+        ? `<b>${u.levels[lv]}</b> ${u.unit} · fully upgraded`
+        : `<b>${u.levels[lv]}</b> → <b>${u.levels[lv + 1]}</b> ${u.unit}`;
+      const btn = maxed
+        ? `<button class="buy" disabled>Max</button>`
+        : `<button class="buy" data-id="${u.id}" ${S.money < cost ? 'disabled' : ''}>${money(cost)}</button>`;
+      return `<div class="item"><div class="nm">${u.name}<span class="tier">MK ${lv + 1}</span></div>${btn}<div class="desc">${desc}</div><div class="pips">${pips}</div></div>`;
+    }).join('');
+
+    const next = nextLocation(L);
+    const openedNext = isMaxed(L) && next;
+    el.storeNote.hidden = !isMaxed(L);
+    el.btnTravel.hidden = !openedNext;
+    if (openedNext) {
+      el.storeNote.textContent = `Every shelf here is bought out. ${next.name} is open: harder rock, richer ore, and a new set of gear to buy.`;
+      el.btnTravel.textContent = `Go to ${next.name}`;
+      el.btnTravel.dataset.loc = next.id;
+    } else if (isMaxed(L)) {
+      el.storeNote.textContent = 'Every shelf here is bought out. This is the deepest mine on the map, for now.';
+    }
+  }
+  el.store.addEventListener('click', e => {
+    const b = e.target.closest('button[data-id]');
+    if (!b) return;
+    const L = LOC();
+    const u = L.upgrades.find(x => x.id === b.dataset.id);
+    const cost = u.costs[S.levels[L.id][u.id]];
+    if (S.money < cost) return;
+    S.money -= cost;
+    S.levels[L.id][u.id] += 1;
+    save();
+    renderStore();
+  });
+  el.locs.addEventListener('click', e => {
+    const b = e.target.closest('button[data-loc]');
+    if (b && !b.disabled) travelTo(b.dataset.loc);
+  });
+  el.btnTravel.addEventListener('click', () => {
+    S.shift += 1;
+    travelTo(el.btnTravel.dataset.loc);
+  });
+
+  el.btnStart.addEventListener('click', startShift);
+  el.btnNext.addEventListener('click', nextShift);
+  el.btnReset.addEventListener('click', resetAll);
+
+  window.addEventListener('keydown', e => {
+    if (e.repeat) return;
+    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
+    if (S.phase === 'ready' && (e.code === 'Space' || e.code === 'Enter')) { startShift(); return; }
+    if (S.phase === 'assay' && e.code === 'Enter') { nextShift(); return; }
+    keys.add(e.code);
+  });
+  window.addEventListener('keyup', e => keys.delete(e.code));
+  window.addEventListener('blur', () => keys.clear());
+  window.addEventListener('pagehide', save);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+
+  // ---------- Loop ----------
+  let last = performance.now();
+  function frame(now) {
+    const dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    update(dt);
+    draw();
+    requestAnimationFrame(frame);
+  }
+
+  loadLocal();
+  resize();
+  readyShift();
+  requestAnimationFrame(frame);
+  connectDb();
+})();
+</script>
+</body>
+</html>
